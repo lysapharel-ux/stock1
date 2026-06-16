@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>StockPro</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0a0f1e;font-family:'Inter',system-ui,sans-serif;}
+@keyframes spin{to{transform:rotate(360deg)}}
+input,select{outline:none;}
+::-webkit-scrollbar{width:6px;}
+::-webkit-scrollbar-track{background:#0a0f1e;}
+::-webkit-scrollbar-thumb{background:#334155;border-radius:3px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const SEED = {
+  users: [
+    { id:"u1", name:"Admin Général", email:"admin@stock.com", password:"admin123", role:"admin", storeIds:[] },
+    { id:"u2", name:"Gérant Paris", email:"paris@stock.com", password:"paris123", role:"manager", storeIds:["s1"] },
+    { id:"u3", name:"Vendeur Lyon", email:"lyon@stock.com", password:"lyon123", role:"staff", storeIds:["s2"] },
+  ],
+  stores: [
+    { id:"central", name:"Entrepôt Central", type:"central" },
+    { id:"s1", name:"Boutique Paris", type:"store" },
+    { id:"s2", name:"Boutique Lyon", type:"store" },
+    { id:"s3", name:"Boutique Bordeaux", type:"store" },
+  ],
+  products: [
+    { id:"p1", name:"T-Shirt Classique", category:"Vêtements", lowStockThreshold:5, basePrice:25,
+      variants:[{id:"v1",label:"Blanc/S"},{id:"v2",label:"Blanc/M"},{id:"v3",label:"Blanc/L"},{id:"v4",label:"Noir/S"},{id:"v5",label:"Noir/M"},{id:"v6",label:"Noir/L"}]},
+    { id:"p2", name:"Jean Slim", category:"Vêtements", lowStockThreshold:3, basePrice:59,
+      variants:[{id:"v7",label:"32/30"},{id:"v8",label:"34/30"},{id:"v9",label:"36/32"}]},
+    { id:"p3", name:"Sneakers Urban", category:"Chaussures", lowStockThreshold:4, basePrice:89,
+      variants:[{id:"v10",label:"Blanc/39"},{id:"v11",label:"Blanc/41"},{id:"v12",label:"Noir/42"}]},
+  ],
+  stock:{
+    central:{v1:50,v2:60,v3:45,v4:55,v5:70,v6:40,v7:30,v8:35,v9:20,v10:25,v11:30,v12:15},
+    s1:{v1:8,v2:6,v3:4,v4:7,v5:5,v6:3,v7:2,v8:4,v9:1,v10:3,v11:2,v12:4},
+    s2:{v1:5,v2:3,v3:2,v4:6,v5:4,v6:2,v7:3,v8:2,v9:2,v10:2,v11:3,v12:1},
+    s3:{v1:4,v2:7,v3:3,v4:3,v5:6,v6:1,v7:1,v8:3,v9:2,v10:4,v11:2,v12:3},
+  },
+  sales:[], expenses:[], history:[],
+};
+
+function loadDb(){ try{ const r=localStorage.getItem("stockpro_v3"); return r?JSON.parse(r):null; }catch{return null;} }
+function saveDb(d){ try{ localStorage.setItem("stockpro_v3",JSON.stringify(d)); }catch{} }
+
+const fmtCur=(n)=>new Intl.NumberFormat("fr-FR",{style:"currency",currency:"EUR"}).format(n||0);
+const fmtDate=(iso)=>new Date(iso).toLocaleDateString("fr-FR");
+const fmtTime=(iso)=>new Date(iso).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+const todayStr=()=>new Date().toISOString().split("T")[0];
+
+const {useState,useEffect,useCallback}=React;
+
+function App(){
+  const [db,setDb]=useState(()=>loadDb()||JSON.parse(JSON.stringify(SEED)));
+  const [user,setUser]=useState(null);
+  const [page,setPage]=useState("dashboard");
+
+  const persist=useCallback((n)=>{setDb(n);saveDb(n);},[]);
+
+  if(!user) return React.createElement(Login,{db,onLogin:u=>{setUser(u);setPage("dashboard");}});
+
+  const myStores=user.role==="admin"?db.stores:db.stores.filter(s=>user.storeIds.includes(s.id)||s.id==="central");
+  const alertCount=db.products.reduce((a,p)=>{p.variants.forEach(v=>db.stores.forEach(s=>{if((db.stock[s.id]?.[v.id]??0)<=p.lowStockThreshold)a++;}));return a;},0);
+
+  const nav=[
+    {id:"dashboard",label:"Tableau de bord",icon:"📊"},
+    {id:"sales",label:"Ventes",icon:"🛒"},
+    {id:"stock",label:"Stock",icon:"📦"},
+    {id:"transfer",label:"Transferts",icon:"🔄"},
+    {id:"expenses",label:"Dépenses",icon:"💸"},
+    {id:"alerts",label:"Alertes",icon:"⚠️"},
+    {id:"history",label:"Historique",icon:"📋"},
+    ...(user.role==="admin"?[
+      {id:"products",label:"Produits",icon:"🏷️"},
+      {id:"users",label:"Utilisateurs",icon:"👥"},
+      {id:"stores",label:"Boutiques",icon:"🏪"},
+    ]:[]),
+  ];
+
+  const pages={
+    dashboard:React.createElement(Dashboard,{db,user,stores:myStores,setPage}),
+    sales:React.createElement(SalesPage,{db,user,stores:myStores,persist}),
+    stock:React.createElement(StockPage,{db,user,stores:myStores,persist}),
+    transfer:React.createElement(TransferPage,{db,user,stores:myStores,persist}),
+    expenses:React.createElement(ExpensesPage,{db,user,stores:myStores,persist}),
+    alerts:React.createElement(AlertsPage,{db,stores:myStores}),
+    history:React.createElement(HistoryPage,{db}),
+    products:user.role==="admin"?React.createElement(ProductsPage,{db,persist}):null,
+    users:user.role==="admin"?React.createElement(UsersPage,{db,persist}):null,
+    stores:user.role==="admin"?React.createElement(StoresPage,{db,persist}):null,
+  };
+
+  return (
+    <div style={{display:"flex",minHeight:"100vh",background:"#0a0f1e"}}>
+      <aside style={{width:200,background:"#0f1629",borderRight:"1px solid #1e293b",display:"flex",flexDirection:"column",position:"fixed",top:0,left:0,bottom:0,overflowY:"auto",zIndex:10}}>
+        <div style={{padding:"16px 14px",display:"flex",alignItems:"center",gap:8,borderBottom:"1px solid #1e293b"}}>
+          <span style={{fontSize:20}}>📦</span>
+          <span style={{fontSize:16,fontWeight:800,color:"#e2e8f0"}}>StockPro</span>
+        </div>
+        <nav style={{flex:1,padding:"8px 6px",display:"flex",flexDirection:"column",gap:1}}>
+          {nav.map(({id,label,icon})=>(
+            <button key={id} onClick={()=>setPage(id)} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:7,border:"none",background:page===id?"#1a1040":"transparent",color:page===id?"#a78bfa":"#475569",fontSize:13,cursor:"pointer",textAlign:"left",width:"100%"}}>
+              <span>{icon}</span><span style={{flex:1}}>{label}</span>
+              {id==="alerts"&&alertCount>0&&<span style={{background:"#ef4444",color:"#fff",borderRadius:99,fontSize:10,fontWeight:700,padding:"1px 6px"}}>{alertCount}</span>}
+            </button>
+          ))}
+        </nav>
+        <div style={{padding:"10px",borderTop:"1px solid #1e293b",display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:30,height:30,borderRadius:"50%",background:"linear-gradient(135deg,#7c3aed,#4f46e5)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:13,flexShrink:0}}>{user.name[0]}</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:12,fontWeight:600,color:"#e2e8f0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user.name}</div>
+            <div style={{fontSize:11,color:"#475569"}}>{user.role==="admin"?"Admin":user.role==="manager"?"Gérant":"Personnel"}</div>
+          </div>
+          <button onClick={()=>setUser(null)} style={{background:"transparent",border:"none",cursor:"pointer",color:"#475569",fontSize:16}} title="Déconnexion">⏏</button>
+        </div>
+      </aside>
+      <main style={{marginLeft:200,flex:1,minHeight:"100vh"}}>
+        {pages[page]}
+      </main>
+    </div>
+  );
+}
+
+function Login({db,onLogin}){
+  const [email,setEmail]=useState("");const [pw,setPw]=useState("");const [err,setErr]=useState("");
+  const go=()=>{const u=db.users.find(x=>x.email===email&&x.password===pw);u?onLogin(u):setErr("Identifiants incorrects.");};
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0a0f1e"}}>
+      <div style={{background:"#111827",border:"1px solid #1e293b",borderRadius:16,padding:36,width:340}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{fontSize:42}}>📦</div>
+          <h1 style={{color:"#e2e8f0",fontSize:22,fontWeight:800,margin:"8px 0 4px"}}>StockPro</h1>
+          <p style={{color:"#475569",fontSize:13}}>Gestion multi-boutiques</p>
+        </div>
+        <input style={inp} placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} type="email"/>
+        <input style={{...inp,marginTop:10}} placeholder="Mot de passe" value={pw} onChange={e=>setPw(e.target.value)} type="password" onKeyDown={e=>e.key==="Enter"&&go()}/>
+        {err&&<p style={{color:"#f87171",fontSize:13,marginTop:6}}>{err}</p>}
+        <button style={{...btn,width:"100%",justifyContent:"center",marginTop:18}} onClick={go}>Se connecter</button>
+        <div style={{marginTop:16,padding:12,background:"#0f172a",borderRadius:8}}>
+          <p style={{color:"#475569",fontSize:11,marginBottom:6,fontWeight:600}}>COMPTES DÉMO</p>
+          {[["admin@stock.com","admin123","Admin"],["paris@stock.com","paris123","Gérant Paris"],["lyon@stock.com","lyon123","Staff Lyon"]].map(([e,p,r])=>(
+            <p key={e} style={{fontSize:12,color:"#64748b",margin:"4px 0"}}>
+              <span style={{color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setEmail(e);setPw(p);}}>{e}</span> · {p} ({r})
+            </p>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({db,user,stores,setPage}){
+  const t=todayStr();const ids=stores.map(s=>s.id);
+  const todaySales=db.sales.filter(s=>s.date.startsWith(t)&&ids.includes(s.storeId));
+  const mRev=db.sales.filter(s=>s.date.startsWith(t.slice(0,7))&&ids.includes(s.storeId)).reduce((a,s)=>a+s.total,0);
+  const mExp=db.expenses.filter(e=>e.date.startsWith(t.slice(0,7))&&ids.includes(e.storeId)).reduce((a,e)=>a+e.amount,0);
+  const alerts=db.products.reduce((a,p)=>{p.variants.forEach(v=>stores.forEach(s=>{if((db.stock[s.id]?.[v.id]??0)<=p.lowStockThreshold)a++;}));return a;},0);
+  const stats=[
+    {l:"CA aujourd'hui",v:fmtCur(todaySales.reduce((a,s)=>a+s.total,0)),c:"#10b981",i:"💰"},
+    {l:"CA ce mois",v:fmtCur(mRev),c:"#6366f1",i:"📈"},
+    {l:"Dépenses mois",v:fmtCur(mExp),c:"#f59e0b",i:"💸"},
+    {l:"Bénéfice net",v:fmtCur(mRev-mExp),c:mRev-mExp>=0?"#10b981":"#ef4444",i:"🏦"},
+    {l:"Alertes stock",v:alerts,c:alerts>0?"#ef4444":"#10b981",i:"⚠️"},
+    {l:"Ventes du jour",v:todaySales.length,c:"#7c3aed",i:"🛒"},
+  ];
+  const recent=[...db.sales].filter(s=>ids.includes(s.storeId)).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+  return (
+    <div style={pg}>
+      <PH title="Tableau de bord" sub={`Bonjour, ${user.name} 👋`}/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12,marginBottom:22}}>
+        {stats.map((s,i)=>(
+          <div key={i} style={{...card,borderLeft:`3px solid ${s.c}`}}>
+            <div style={{fontSize:20,marginBottom:4}}>{s.i}</div>
+            <div style={{fontSize:20,fontWeight:800,color:s.c}}>{s.v}</div>
+            <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{s.l}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <div style={card}>
+          <div style={ctitle}>Dernières ventes</div>
+          {recent.length===0?<p style={{color:"#475569",fontSize:13}}>Aucune vente.</p>:recent.map(s=>{
+            const st=db.stores.find(x=>x.id===s.storeId);
+            return <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #1e293b"}}>
+              <div><div style={{fontSize:13,color:"#e2e8f0"}}>{st?.name}</div><div style={{fontSize:11,color:"#475569"}}>{fmtDate(s.date)}</div></div>
+              <div style={{fontWeight:700,color:"#10b981"}}>{fmtCur(s.total)}</div>
+            </div>;
+          })}
+        </div>
+        <div style={card}>
+          <div style={ctitle}>Stock par boutique</div>
+          {stores.map(s=>{
+            let tot=0,low=0;db.products.forEach(p=>p.variants.forEach(v=>{const q=db.stock[s.id]?.[v.id]??0;tot+=q;if(q<=p.lowStockThreshold)low++;}));
+            return <div key={s.id} style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontSize:13,color:"#e2e8f0"}}>{s.type==="central"?"🏭":"🏪"} {s.name}</span>
+                <span style={{fontSize:13,fontWeight:700,color:"#e2e8f0"}}>{tot} u.</span>
+              </div>
+              {low>0&&<div style={{fontSize:11,color:"#f87171"}}>⚠ {low} alerte{low>1?"s":""}</div>}
+            </div>;
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SalesPage({db,user,stores,persist}){
+  const sStores=stores.filter(s=>s.type==="store");
+  const [tab,setTab]=useState("new");
+  const [sid,setSid]=useState(sStores[0]?.id||"");
+  const [items,setItems]=useState([]);
+  const [note,setNote]=useState("");
+  const [msg,setMsg]=useState({});
+  const [sp,setSp]=useState(db.products[0]?.id||"");
+  const [sv,setSv]=useState(db.products[0]?.variants[0]?.id||"");
+  const [sq,setSq]=useState(1);
+  const [spr,setSpr]=useState(db.products[0]?.basePrice||0);
+  const [filter,setFilter]=useState({store:"all",date:todayStr()});
+  const prod=db.products.find(p=>p.id===sp);
+  const total=items.reduce((a,i)=>a+i.qty*i.unitPrice,0);
+
+  const addItem=()=>{
+    const avail=db.stock[sid]?.[sv]??0;
+    if(sq>avail){setMsg({t:"err",m:`Stock insuffisant (dispo: ${avail})`});return;}
+    const p=db.products.find(x=>x.id===sp),v=p?.variants.find(x=>x.id===sv);
+    setItems(it=>{const ex=it.find(x=>x.variantId===sv);return ex?it.map(x=>x.variantId===sv?{...x,qty:x.qty+sq}:x):[...it,{productId:sp,variantId:sv,qty:sq,unitPrice:parseFloat(spr),productName:p?.name,variantLabel:v?.label}];});
+    setMsg({});
+  };
+
+  const confirm=()=>{
+    if(!sid||!items.length)return;
+    const n=JSON.parse(JSON.stringify(db));
+    for(const it of items){if((n.stock[sid]?.[it.variantId]??0)<it.qty){setMsg({t:"err",m:`Stock insuffisant: ${it.productName}`});return;}}
+    items.forEach(it=>{n.stock[sid][it.variantId]-=it.qty;});
+    n.sales.unshift({id:`sale_${Date.now()}`,storeId:sid,date:new Date().toISOString(),user:user.name,items,total,note});
+    persist(n);setItems([]);setNote("");setMsg({t:"ok",m:"✅ Vente enregistrée !"});setTimeout(()=>setMsg({}),3000);
+  };
+
+  const myIds=stores.map(s=>s.id);
+  const filtered=db.sales.filter(s=>{
+    if(!myIds.includes(s.storeId))return false;
+    if(filter.store!=="all"&&s.storeId!==filter.store)return false;
+    if(filter.date&&!s.date.startsWith(filter.date))return false;
+    return true;
+  });
+
+  return (
+    <div style={pg}>
+      <PH title="Ventes" sub="Enregistrer et consulter les ventes"/>
+      <div style={{display:"flex",gap:8,marginBottom:18}}>
+        {[["new","➕ Nouvelle vente"],["history","📋 Historique"]].map(([v,l])=>(
+          <button key={v} style={{...stab,...(tab===v?stabA:{})}} onClick={()=>setTab(v)}>{l}</button>
+        ))}
+      </div>
+      {tab==="new"&&(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+          <div>
+            <div style={card}>
+              <div style={ctitle}>Boutique</div>
+              <select style={sel} value={sid} onChange={e=>{setSid(e.target.value);setItems([]);}}>
+                {sStores.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div style={{...card,marginTop:12}}>
+              <div style={ctitle}>Ajouter un article</div>
+              <label style={lbl}>Produit</label>
+              <select style={sel} value={sp} onChange={e=>{const p=db.products.find(x=>x.id===e.target.value);setSp(e.target.value);setSv(p?.variants[0]?.id||"");setSpr(p?.basePrice||0);}}>
+                {db.products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <label style={{...lbl,marginTop:10}}>Variante</label>
+              <select style={sel} value={sv} onChange={e=>setSv(e.target.value)}>
+                {prod?.variants.map(v=><option key={v.id} value={v.id}>{v.label} (stock: {db.stock[sid]?.[v.id]??0})</option>)}
+              </select>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:10}}>
+                <div><label style={lbl}>Qté</label><input style={inp} type="number" min="1" value={sq} onChange={e=>setSq(parseInt(e.target.value)||1)}/></div>
+                <div><label style={lbl}>Prix (€)</label><input style={inp} type="number" min="0" step="0.01" value={spr} onChange={e=>setSpr(e.target.value)}/></div>
+              </div>
+              {msg.t==="err"&&<p style={{color:"#f87171",fontSize:13,marginTop:6}}>{msg.m}</p>}
+              <button style={{...btn,marginTop:12}} onClick={addItem}>+ Ajouter</button>
+            </div>
+            <div style={{...card,marginTop:12}}>
+              <label style={lbl}>Note</label>
+              <input style={inp} placeholder="Commentaire optionnel…" value={note} onChange={e=>setNote(e.target.value)}/>
+            </div>
+          </div>
+          <div style={card}>
+            <div style={ctitle}>Panier</div>
+            {items.length===0?<p style={{color:"#475569",fontSize:13,padding:"20px 0",textAlign:"center"}}>Aucun article.</p>:items.map((it,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #1e293b"}}>
+                <div>
+                  <div style={{fontSize:13,color:"#e2e8f0",fontWeight:500}}>{it.productName}</div>
+                  <div style={{fontSize:12,color:"#64748b"}}>{it.variantLabel} · {it.qty} × {fmtCur(it.unitPrice)}</div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontWeight:700,color:"#e2e8f0"}}>{fmtCur(it.qty*it.unitPrice)}</span>
+                  <button style={{background:"transparent",border:"none",color:"#ef4444",cursor:"pointer",fontSize:16}} onClick={()=>setItems(x=>x.filter((_,j)=>j!==i))}>✕</button>
+                </div>
+              </div>
+            ))}
+            {items.length>0&&<>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"12px 0 0",borderTop:"1px solid #334155",marginTop:4}}>
+                <span style={{fontWeight:700,color:"#94a3b8"}}>TOTAL</span>
+                <span style={{fontWeight:800,fontSize:20,color:"#10b981"}}>{fmtCur(total)}</span>
+              </div>
+              {msg.t==="ok"&&<p style={{color:"#10b981",fontSize:13,marginTop:8}}>{msg.m}</p>}
+              <button style={{...btn,background:"#059669",width:"100%",justifyContent:"center",marginTop:12,fontSize:14}} onClick={confirm}>✓ Valider — {fmtCur(total)}</button>
+            </>}
+          </div>
+        </div>
+      )}
+      {tab==="history"&&<>
+        <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+          <select style={{...sel,width:"auto"}} value={filter.store} onChange={e=>setFilter(f=>({...f,store:e.target.value}))}>
+            <option value="all">Toutes les boutiques</option>
+            {stores.filter(s=>s.type==="store").map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <input style={{...inp,width:160}} type="date" value={filter.date} onChange={e=>setFilter(f=>({...f,date:e.target.value}))}/>
+          <button style={btnO} onClick={()=>setFilter({store:"all",date:""})}>Tout voir</button>
+          <span style={{color:"#10b981",fontWeight:700,marginLeft:"auto"}}>{filtered.length} vente{filtered.length>1?"s":""} · {fmtCur(filtered.reduce((a,s)=>a+s.total,0))}</span>
+        </div>
+        {filtered.length===0?<div style={{...card,textAlign:"center",padding:40}}><p style={{color:"#475569"}}>Aucune vente.</p></div>:filtered.map(s=>{
+          const st=db.stores.find(x=>x.id===s.storeId);
+          return <div key={s.id} style={{...card,marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div>
+                <div style={{fontWeight:600,color:"#e2e8f0",marginBottom:3}}>🏪 {st?.name}</div>
+                <div style={{fontSize:12,color:"#475569"}}>{fmtDate(s.date)} à {fmtTime(s.date)} · {s.user}</div>
+                <div style={{marginTop:7,display:"flex",gap:5,flexWrap:"wrap"}}>
+                  {s.items.map((it,i)=><span key={i} style={chip}>{it.productName}/{it.variantLabel} ×{it.qty} @ {fmtCur(it.unitPrice)}</span>)}
+                </div>
+                {s.note&&<div style={{fontSize:12,color:"#64748b",marginTop:5,fontStyle:"italic"}}>{s.note}</div>}
+              </div>
+              <div style={{fontWeight:800,fontSize:17,color:"#10b981",flexShrink:0,marginLeft:10}}>{fmtCur(s.total)}</div>
+            </div>
+          </div>;
+        })}
+      </>}
+    </div>
+  );
+}
+
+function StockPage({db,user,stores,persist}){
+  const [sid,setSid]=useState(stores[0]?.id||"central");
+  const [edit,setEdit]=useState(false);
+  const [draft,setDraft]=useState({});
+  const [q,setQ]=useState("");
+  const canEdit=user.role==="admin"||(user.role==="manager"&&user.storeIds.includes(sid));
+  const filtered=db.products.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.category.toLowerCase().includes(q.toLowerCase()));
+  const startEdit=()=>{const d={};db.products.forEach(p=>p.variants.forEach(v=>{d[v.id]=db.stock[sid]?.[v.id]??0;}));setDraft(d);setEdit(true);};
+  const save=()=>{const n=JSON.parse(JSON.stringify(db));if(!n.stock[sid])n.stock[sid]={};Object.entries(draft).forEach(([vid,qty])=>{n.stock[sid][vid]=parseInt(qty)||0;});n.history.unshift({id:Date.now(),type:"adjust",storeId:sid,date:new Date().toISOString(),user:user.name,note:"Ajustement manuel"});persist(n);setEdit(false);};
+  return (
+    <div style={pg}>
+      <PH title="Stock" sub="Inventaire par emplacement">
+        {canEdit&&!edit&&<button style={btn} onClick={startEdit}>✏️ Ajuster</button>}
+        {edit&&<><button style={{...btn,background:"#059669"}} onClick={save}>✓ Sauvegarder</button><button style={{...btnO,marginLeft:8}} onClick={()=>setEdit(false)}>Annuler</button></>}
+      </PH>
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        {stores.map(s=><button key={s.id} style={{...stab,...(sid===s.id?stabA:{})}} onClick={()=>{setSid(s.id);setEdit(false);}}>{s.type==="central"?"🏭":"🏪"} {s.name}</button>)}
+      </div>
+      <input style={{...inp,maxWidth:280,marginBottom:12}} placeholder="🔍 Rechercher…" value={q} onChange={e=>setQ(e.target.value)}/>
+      {filtered.map(p=>(
+        <div key={p.id} style={{...card,marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div><span style={{fontWeight:600,color:"#e2e8f0",marginRight:7}}>{p.name}</span><span style={chip}>{p.category}</span></div>
+            <span style={{fontSize:12,color:"#475569"}}>Seuil:{p.lowStockThreshold} · {fmtCur(p.basePrice)}</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:6}}>
+            {p.variants.map(v=>{const qty=edit?(draft[v.id]??0):(db.stock[sid]?.[v.id]??0);const low=qty<=p.lowStockThreshold;return(
+              <div key={v.id} style={{background:"#0a0f1e",borderRadius:7,padding:"8px 10px",border:`1px solid ${low?"#ef4444":"#1e293b"}`,background:low?"#1a0808":"#0a0f1e"}}>
+                <div style={{fontSize:11,color:"#64748b",marginBottom:3}}>{v.label}</div>
+                {edit?<input style={{width:"100%",background:"#111827",border:"1px solid #334155",borderRadius:5,color:"#e2e8f0",fontSize:15,fontWeight:700,padding:"3px 6px",textAlign:"center"}} type="number" min="0" value={draft[v.id]??0} onChange={e=>setDraft(d=>({...d,[v.id]:e.target.value}))}/>:<div style={{fontSize:20,fontWeight:800,color:low?"#f87171":"#e2e8f0"}}>{qty}</div>}
+                {low&&!edit&&<div style={{fontSize:10,color:"#f87171"}}>⚠ Bas</div>}
+              </div>
+            );})}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TransferPage({db,user,stores,persist}){
+  const [from,setFrom]=useState("central");const [to,setTo]=useState(stores.find(s=>s.type==="store")?.id||"");
+  const [pid,setPid]=useState(db.products[0]?.id||"");const [qtys,setQtys]=useState({});const [msg,setMsg]=useState({});
+  const prod=db.products.find(p=>p.id===pid);
+  const go=()=>{
+    if(from===to){setMsg({t:"err",m:"Source = destination."});return;}
+    const entries=Object.entries(qtys).filter(([,q])=>parseInt(q)>0);
+    if(!entries.length){setMsg({t:"err",m:"Aucune quantité."});return;}
+    for(const[vid,q]of entries){const a=db.stock[from]?.[vid]??0;if(parseInt(q)>a){setMsg({t:"err",m:`Insuffisant: ${prod.variants.find(v=>v.id===vid)?.label} (dispo:${a})`});return;}}
+    const n=JSON.parse(JSON.stringify(db));
+    entries.forEach(([vid,q])=>{const qty=parseInt(q);n.stock[from][vid]=(n.stock[from][vid]??0)-qty;if(!n.stock[to])n.stock[to]={};n.stock[to][vid]=(n.stock[to][vid]??0)+qty;});
+    const fS=db.stores.find(s=>s.id===from),tS=db.stores.find(s=>s.id===to);
+    n.history.unshift({id:Date.now(),type:"transfer",from:fS.name,to:tS.name,product:prod.name,items:entries.map(([vid,q])=>({variant:prod.variants.find(v=>v.id===vid)?.label,qty:parseInt(q)})),date:new Date().toISOString(),user:user.name});
+    persist(n);setQtys({});setMsg({t:"ok",m:"✅ Transfert effectué !"});setTimeout(()=>setMsg({}),3000);
+  };
+  return (
+    <div style={pg}>
+      <PH title="Transferts" sub="Déplacer du stock entre emplacements"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+        <div style={card}><label style={lbl}>Source</label><select style={sel} value={from} onChange={e=>setFrom(e.target.value)}>{stores.map(s=><option key={s.id} value={s.id}>{s.type==="central"?"🏭":"🏪"} {s.name}</option>)}</select></div>
+        <div style={card}><label style={lbl}>Destination</label><select style={sel} value={to} onChange={e=>setTo(e.target.value)}>{stores.filter(s=>s.id!==from).map(s=><option key={s.id} value={s.id}>{s.type==="central"?"🏭":"🏪"} {s.name}</option>)}</select></div>
+      </div>
+      <div style={card}>
+        <label style={lbl}>Produit</label>
+        <select style={sel} value={pid} onChange={e=>{setPid(e.target.value);setQtys({});}}>{db.products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        {prod&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:6,marginTop:12}}>
+          {prod.variants.map(v=>{const a=db.stock[from]?.[v.id]??0;return(
+            <div key={v.id} style={{background:"#0a0f1e",borderRadius:7,padding:"8px 10px",border:"1px solid #1e293b"}}>
+              <div style={{fontSize:11,color:"#64748b",marginBottom:3}}>{v.label}</div>
+              <div style={{fontSize:12,color:"#475569",marginBottom:5}}>Dispo:{a}</div>
+              <input style={{width:"100%",background:"#111827",border:"1px solid #334155",borderRadius:5,color:"#e2e8f0",fontSize:14,fontWeight:700,padding:"3px 6px",textAlign:"center"}} type="number" min="0" max={a} placeholder="0" value={qtys[v.id]||""} onChange={e=>setQtys(q=>({...q,[v.id]:e.target.value}))}/>
+            </div>
+          );})}
+        </div>}
+      </div>
+      {msg.m&&<div style={{...card,marginTop:10,borderColor:msg.t==="ok"?"#059669":"#ef4444"}}><p style={{color:msg.t==="ok"?"#10b981":"#f87171",margin:0}}>{msg.m}</p></div>}
+      <button style={{...btn,marginTop:12}} onClick={go}>🔄 Confirmer</button>
+    </div>
+  );
+}
+
+const ECATS=["Livraison","Transport","Expédition","Loyer","Salaires","Marketing","Fournitures","Autre"];
+function ExpensesPage({db,user,stores,persist}){
+  const [tab,setTab]=useState("new");
+  const [form,setForm]=useState({storeId:stores.find(s=>s.type==="store")?.id||"",category:"Livraison",label:"",amount:""});
+  const [msg,setMsg]=useState({});
+  const [filter,setFilter]=useState({store:"all",month:todayStr().slice(0,7)});
+  const add=()=>{
+    if(!form.storeId||!form.label||!form.amount){setMsg({t:"err",m:"Remplis tous les champs."});return;}
+    const n=JSON.parse(JSON.stringify(db));
+    n.expenses.unshift({id:`exp_${Date.now()}`,storeId:form.storeId,date:new Date().toISOString(),user:user.name,category:form.category,label:form.label,amount:parseFloat(form.amount)});
+    persist(n);setForm(f=>({...f,label:"",amount:""}));setMsg({t:"ok",m:"✅ Enregistrée !"});setTimeout(()=>setMsg({}),2500);
+  };
+  const ids=stores.map(s=>s.id);
+  const filtered=db.expenses.filter(e=>{
+    if(!ids.includes(e.storeId))return false;
+    if(filter.store!=="all"&&e.storeId!==filter.store)return false;
+    if(filter.month&&!e.date.startsWith(filter.month))return false;
+    return true;
+  });
+  const byCat={};filtered.forEach(e=>{byCat[e.category]=(byCat[e.category]||0)+e.amount;});
+  return (
+    <div style={pg}>
+      <PH title="Dépenses & Charges" sub="Livraison, transport, expédition…"/>
+      <div style={{display:"flex",gap:8,marginBottom:18}}>
+        {[["new","➕ Ajouter"],["history","📋 Historique"]].map(([v,l])=>(
+          <button key={v} style={{...stab,...(tab===v?stabA:{})}} onClick={()=>setTab(v)}>{l}</button>
+        ))}
+      </div>
+      {tab==="new"&&<div style={{maxWidth:460}}>
+        <div style={card}>
+          <div style={ctitle}>Nouvelle dépense</div>
+          <label style={lbl}>Boutique</label>
+          <select style={sel} value={form.storeId} onChange={e=>setForm(f=>({...f,storeId:e.target.value}))}>
+            {stores.filter(s=>s.type==="store").map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <label style={{...lbl,marginTop:10}}>Catégorie</label>
+          <select style={sel} value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>
+            {ECATS.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+          <label style={{...lbl,marginTop:10}}>Description</label>
+          <input style={inp} placeholder="Ex: Livraison DHL commande #1234" value={form.label} onChange={e=>setForm(f=>({...f,label:e.target.value}))}/>
+          <label style={{...lbl,marginTop:10}}>Montant (€)</label>
+          <input style={inp} type="number" min="0" step="0.01" placeholder="0.00" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/>
+          {msg.m&&<p style={{color:msg.t==="ok"?"#10b981":"#f87171",fontSize:13,marginTop:8}}>{msg.m}</p>}
+          <button style={{...btn,marginTop:12}} onClick={add}>+ Enregistrer</button>
+        </div>
+      </div>}
+      {tab==="history"&&<>
+        <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+          <select style={{...sel,width:"auto"}} value={filter.store} onChange={e=>setFilter(f=>({...f,store:e.target.value}))}>
+            <option value="all">Toutes</option>
+            {stores.filter(s=>s.type==="store").map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <input style={{...inp,width:150}} type="month" value={filter.month} onChange={e=>setFilter(f=>({...f,month:e.target.value}))}/>
+          <button style={btnO} onClick={()=>setFilter({store:"all",month:""})}>Tout</button>
+          <span style={{color:"#f59e0b",fontWeight:700,marginLeft:"auto"}}>Total: {fmtCur(filtered.reduce((a,e)=>a+e.amount,0))}</span>
+        </div>
+        {Object.keys(byCat).length>0&&<div style={{...card,marginBottom:12}}>
+          <div style={ctitle}>Par catégorie</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([c,a])=>(
+              <div key={c} style={{background:"#0f172a",borderRadius:7,padding:"7px 12px",textAlign:"center"}}>
+                <div style={{fontSize:12,color:"#94a3b8"}}>{c}</div>
+                <div style={{fontWeight:700,color:"#f59e0b"}}>{fmtCur(a)}</div>
+              </div>
+            ))}
+          </div>
+        </div>}
+        {filtered.length===0?<div style={{...card,textAlign:"center",padding:36}}><p style={{color:"#475569"}}>Aucune dépense.</p></div>:filtered.map(e=>{
+          const st=db.stores.find(s=>s.id===e.storeId);
+          return <div key={e.id} style={{...card,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3}}><span style={{...chip,background:"#1c1408",color:"#f59e0b"}}>{e.category}</span><span style={{fontSize:13,color:"#e2e8f0"}}>{e.label}</span></div>
+              <div style={{fontSize:12,color:"#475569"}}>🏪 {st?.name} · {fmtDate(e.date)} · {e.user}</div>
+            </div>
+            <div style={{fontWeight:800,fontSize:16,color:"#f59e0b",flexShrink:0,marginLeft:10}}>{fmtCur(e.amount)}</div>
+          </div>;
+        })}
+      </>}
+    </div>
+  );
+}
+
+function AlertsPage({db,stores}){
+  const alerts=[];
+  db.products.forEach(p=>p.variants.forEach(v=>stores.forEach(s=>{const q=db.stock[s.id]?.[v.id]??0;if(q<=p.lowStockThreshold)alerts.push({product:p.name,variant:v.label,store:s.name,storeType:s.type,qty:q,threshold:p.lowStockThreshold});})));
+  return (
+    <div style={pg}>
+      <PH title="Alertes stock bas" sub={`${alerts.length} article${alerts.length>1?"s":""} sous le seuil`}/>
+      {alerts.length===0?<div style={{...card,textAlign:"center",padding:48}}><div style={{fontSize:40}}>✅</div><p style={{color:"#10b981",fontSize:16,marginTop:8}}>Tout est en ordre !</p></div>:alerts.map((a,i)=>(
+        <div key={i} style={{...card,marginBottom:8,borderLeft:"3px solid #ef4444",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontWeight:600,color:"#e2e8f0"}}>{a.product} — <span style={{color:"#94a3b8"}}>{a.variant}</span></div><div style={{fontSize:13,color:"#64748b"}}>{a.storeType==="central"?"🏭":"🏪"} {a.store}</div></div>
+          <div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:"#f87171"}}>{a.qty}</div><div style={{fontSize:12,color:"#64748b"}}>seuil:{a.threshold}</div></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HistoryPage({db}){
+  const [f,setF]=useState("all");const filtered=f==="all"?db.history:db.history.filter(h=>h.type===f);
+  return (
+    <div style={pg}>
+      <PH title="Historique" sub={`${db.history.length} mouvement${db.history.length>1?"s":""}`}>
+        <div style={{display:"flex",gap:6}}>
+          {[["all","Tous"],["transfer","Transferts"],["adjust","Ajustements"]].map(([v,l])=>(
+            <button key={v} style={{...stab,...(f===v?stabA:{})}} onClick={()=>setF(v)}>{l}</button>
+          ))}
+        </div>
+      </PH>
+      {filtered.length===0?<div style={{...card,textAlign:"center",padding:40}}><p style={{color:"#475569"}}>Aucun mouvement.</p></div>:filtered.map(h=>(
+        <div key={h.id} style={{...card,marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <span style={{...chip,background:h.type==="transfer"?"#0f2340":"#0f2a1a",color:h.type==="transfer"?"#60a5fa":"#4ade80"}}>{h.type==="transfer"?"🔄 Transfert":"✏️ Ajustement"}</span>
+              {h.type==="transfer"&&<div style={{marginTop:7}}><div style={{color:"#e2e8f0",fontWeight:600}}>{h.product}</div><div style={{color:"#94a3b8",fontSize:13}}>{h.from} → {h.to}</div><div style={{marginTop:5,display:"flex",gap:5,flexWrap:"wrap"}}>{h.items?.map((it,i)=><span key={i} style={chip}>{it.variant}:{it.qty}</span>)}</div></div>}
+              {h.type==="adjust"&&<div style={{color:"#e2e8f0",marginTop:6}}>{h.note}</div>}
+            </div>
+            <div style={{textAlign:"right",fontSize:12,color:"#475569",flexShrink:0,marginLeft:10}}><div>{fmtDate(h.date)}</div><div>{fmtTime(h.date)}</div><div style={{marginTop:2}}>{h.user}</div></div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProductsPage({db,persist}){
+  const [show,setShow]=useState(false);const [np,setNp]=useState({name:"",category:"",basePrice:"",lowStockThreshold:5,variantInput:""});
+  const add=()=>{if(!np.name.trim())return;const variants=np.variantInput.split(",").map(v=>v.trim()).filter(Boolean).map((label,i)=>({id:`v_${Date.now()}_${i}`,label}));if(!variants.length)return;const n=JSON.parse(JSON.stringify(db));const id=`p_${Date.now()}`;n.products.push({id,name:np.name,category:np.category||"Général",basePrice:parseFloat(np.basePrice)||0,lowStockThreshold:parseInt(np.lowStockThreshold)||5,variants});db.stores.forEach(s=>{if(!n.stock[s.id])n.stock[s.id]={};variants.forEach(v=>{n.stock[s.id][v.id]=0;});});persist(n);setShow(false);setNp({name:"",category:"",basePrice:"",lowStockThreshold:5,variantInput:""}); };
+  const del=(pid)=>{const n=JSON.parse(JSON.stringify(db));const p=n.products.find(x=>x.id===pid);if(p){p.variants.forEach(v=>{n.stores.forEach(s=>{delete n.stock[s.id]?.[v.id];});});n.products=n.products.filter(x=>x.id!==pid);}persist(n);};
+  return (
+    <div style={pg}>
+      <PH title="Produits" sub={`${db.products.length} produit${db.products.length>1?"s":""}`}><button style={btn} onClick={()=>setShow(!show)}>+ Ajouter</button></PH>
+      {show&&<div style={{...card,marginBottom:12,borderColor:"#7c3aed"}}>
+        <div style={ctitle}>Nouveau produit</div>
+        <input style={inp} placeholder="Nom" value={np.name} onChange={e=>setNp(p=>({...p,name:e.target.value}))}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:8}}>
+          <input style={inp} placeholder="Catégorie" value={np.category} onChange={e=>setNp(p=>({...p,category:e.target.value}))}/>
+          <input style={inp} type="number" placeholder="Prix de base (€)" value={np.basePrice} onChange={e=>setNp(p=>({...p,basePrice:e.target.value}))}/>
+        </div>
+        <input style={{...inp,marginTop:8}} type="number" placeholder="Seuil d'alerte" value={np.lowStockThreshold} onChange={e=>setNp(p=>({...p,lowStockThreshold:e.target.value}))}/>
+        <input style={{...inp,marginTop:8}} placeholder="Variantes séparées par virgule (ex: Rouge/S, Rouge/M)" value={np.variantInput} onChange={e=>setNp(p=>({...p,variantInput:e.target.value}))}/>
+        <div style={{display:"flex",gap:8,marginTop:10}}><button style={btn} onClick={add}>Créer</button><button style={btnO} onClick={()=>setShow(false)}>Annuler</button></div>
+      </div>}
+      {db.products.map(p=>(
+        <div key={p.id} style={{...card,marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div><span style={{fontWeight:600,color:"#e2e8f0",marginRight:7}}>{p.name}</span><span style={chip}>{p.category}</span><span style={{...chip,color:"#10b981"}}>{fmtCur(p.basePrice)}</span><span style={{...chip,color:"#64748b"}}>seuil:{p.lowStockThreshold}</span></div>
+            <button style={{...btnO,borderColor:"#ef4444",color:"#f87171"}} onClick={()=>del(p.id)}>✕ Supprimer</button>
+          </div>
+          <div style={{marginTop:8,display:"flex",gap:5,flexWrap:"wrap"}}>{p.variants.map(v=><span key={v.id} style={chip}>{v.label}</span>)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function UsersPage({db,persist}){
+  const [show,setShow]=useState(false);const [nu,setNu]=useState({name:"",email:"",password:"",role:"staff",storeIds:[]});
+  const add=()=>{if(!nu.name||!nu.email||!nu.password)return;const n=JSON.parse(JSON.stringify(db));n.users.push({id:`u_${Date.now()}`,...nu});persist(n);setShow(false);setNu({name:"",email:"",password:"",role:"staff",storeIds:[]});};
+  const del=(uid)=>{const n=JSON.parse(JSON.stringify(db));n.users=n.users.filter(u=>u.id!==uid);persist(n);};
+  const rl={admin:"Administrateur",manager:"Gérant",staff:"Personnel"};
+  return (
+    <div style={pg}>
+      <PH title="Utilisateurs" sub={`${db.users.length} utilisateur${db.users.length>1?"s":""}`}><button style={btn} onClick={()=>setShow(!show)}>+ Ajouter</button></PH>
+      {show&&<div style={{...card,marginBottom:12,borderColor:"#7c3aed"}}>
+        <div style={ctitle}>Nouvel utilisateur</div>
+        <input style={inp} placeholder="Nom complet" value={nu.name} onChange={e=>setNu(u=>({...u,name:e.target.value}))}/>
+        <input style={{...inp,marginTop:8}} placeholder="Email" value={nu.email} onChange={e=>setNu(u=>({...u,email:e.target.value}))}/>
+        <input style={{...inp,marginTop:8}} placeholder="Mot de passe" value={nu.password} onChange={e=>setNu(u=>({...u,password:e.target.value}))}/>
+        <select style={{...sel,marginTop:8}} value={nu.role} onChange={e=>setNu(u=>({...u,role:e.target.value}))}><option value="admin">Administrateur</option><option value="manager">Gérant</option><option value="staff">Personnel</option></select>
+        {nu.role!=="admin"&&<div style={{marginTop:8}}><label style={lbl}>Boutiques</label>{db.stores.filter(s=>s.type==="store").map(s=><label key={s.id} style={{display:"flex",alignItems:"center",gap:8,marginTop:5,cursor:"pointer"}}><input type="checkbox" checked={nu.storeIds.includes(s.id)} onChange={e=>setNu(u=>({...u,storeIds:e.target.checked?[...u.storeIds,s.id]:u.storeIds.filter(x=>x!==s.id)}))}/><span style={{color:"#e2e8f0",fontSize:13}}>{s.name}</span></label>)}</div>}
+        <div style={{display:"flex",gap:8,marginTop:10}}><button style={btn} onClick={add}>Créer</button><button style={btnO} onClick={()=>setShow(false)}>Annuler</button></div>
+      </div>}
+      {db.users.map(u=>(
+        <div key={u.id} style={{...card,marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#7c3aed,#4f46e5)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,flexShrink:0}}>{u.name[0]}</div>
+              <div><div style={{fontWeight:600,color:"#e2e8f0"}}>{u.name}</div><div style={{fontSize:12,color:"#475569"}}>{u.email}</div><span style={{...chip,background:u.role==="admin"?"#1e1b4b":"#0f172a",color:u.role==="admin"?"#818cf8":"#64748b"}}>{rl[u.role]}</span>{u.storeIds?.map(sid=>{const s=db.stores.find(x=>x.id===sid);return s?<span key={sid} style={chip}>{s.name}</span>:null;})}</div>
+            </div>
+            <button style={{...btnO,borderColor:"#ef4444",color:"#f87171"}} onClick={()=>del(u.id)}>✕</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StoresPage({db,persist}){
+  const [show,setShow]=useState(false);const [name,setName]=useState("");
+  const add=()=>{if(!name.trim())return;const n=JSON.parse(JSON.stringify(db));const id=`s_${Date.now()}`;n.stores.push({id,name,type:"store"});n.stock[id]={};persist(n);setShow(false);setName("");};
+  const del=(sid)=>{if(sid==="central")return;const n=JSON.parse(JSON.stringify(db));n.stores=n.stores.filter(s=>s.id!==sid);delete n.stock[sid];persist(n);};
+  return (
+    <div style={pg}>
+      <PH title="Boutiques" sub={`${db.stores.length} emplacement${db.stores.length>1?"s":""}`}><button style={btn} onClick={()=>setShow(!show)}>+ Ajouter</button></PH>
+      {show&&<div style={{...card,marginBottom:12,borderColor:"#7c3aed"}}><input style={inp} placeholder="Nom de la boutique" value={name} onChange={e=>setName(e.target.value)}/><div style={{display:"flex",gap:8,marginTop:8}}><button style={btn} onClick={add}>Créer</button><button style={btnO} onClick={()=>setShow(false)}>Annuler</button></div></div>}
+      {db.stores.map(s=>{
+        let tot=0;db.products.forEach(p=>p.variants.forEach(v=>{tot+=db.stock[s.id]?.[v.id]??0;}));
+        const rev=db.sales.filter(x=>x.storeId===s.id).reduce((a,x)=>a+x.total,0);
+        return <div key={s.id} style={{...card,marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div><span style={{fontSize:18,marginRight:7}}>{s.type==="central"?"🏭":"🏪"}</span><span style={{fontWeight:600,color:"#e2e8f0",marginRight:7}}>{s.name}</span><span style={chip}>{s.type==="central"?"Entrepôt":"Boutique"}</span></div>
+            <div style={{display:"flex",alignItems:"center",gap:14}}>
+              <div style={{textAlign:"right"}}><div style={{fontSize:13,color:"#64748b"}}>Stock: <span style={{fontWeight:700,color:"#e2e8f0"}}>{tot}</span></div><div style={{fontSize:13,color:"#64748b"}}>CA: <span style={{fontWeight:700,color:"#10b981"}}>{fmtCur(rev)}</span></div></div>
+              {s.id!=="central"&&<button style={{...btnO,borderColor:"#ef4444",color:"#f87171"}} onClick={()=>del(s.id)}>✕</button>}
+            </div>
+          </div>
+        </div>;
+      })}
+    </div>
+  );
+}
+
+function PH({title,sub,children}){
+  return <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+    <div><h2 style={{color:"#e2e8f0",fontSize:20,fontWeight:800,margin:0}}>{title}</h2><p style={{color:"#475569",fontSize:13,margin:"3px 0 0"}}>{sub}</p></div>
+    {children&&<div style={{display:"flex",gap:8,alignItems:"center"}}>{children}</div>}
+  </div>;
+}
+
+const pg={padding:"22px 22px 48px"};
+const card={background:"#111827",border:"1px solid #1e293b",borderRadius:10,padding:"13px 16px"};
+const ctitle={color:"#475569",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:12};
+const chip={display:"inline-block",background:"#0f172a",color:"#64748b",borderRadius:5,padding:"2px 7px",fontSize:11,marginRight:4};
+const stab={padding:"6px 12px",borderRadius:7,border:"1px solid #1e293b",background:"transparent",color:"#475569",fontSize:13,cursor:"pointer"};
+const stabA={background:"#1a1040",borderColor:"#4f46e5",color:"#a78bfa"};
+const btn={display:"inline-flex",alignItems:"center",gap:5,padding:"8px 14px",borderRadius:7,border:"none",background:"#7c3aed",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"};
+const btnO={display:"inline-flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:7,border:"1px solid #1e293b",background:"transparent",color:"#64748b",fontSize:13,cursor:"pointer"};
+const inp={width:"100%",background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:7,color:"#e2e8f0",fontSize:13,padding:"8px 11px",boxSizing:"border-box"};
+const sel={width:"100%",background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:7,color:"#e2e8f0",fontSize:13,padding:"8px 11px"};
+const lbl={display:"block",color:"#475569",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4};
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+</body>
+</html>
