@@ -7,6 +7,28 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBdSCDKJoYC7Z7bWjpfkUwYe-wO2DUFvSE",
+    authDomain: "stockpro-f403f.firebaseapp.com",
+    projectId: "stockpro-f403f",
+    storageBucket: "stockpro-f403f.firebasestorage.app",
+    messagingSenderId: "299606018178",
+    appId: "1:299606018178:web:4101582055a322b6fc0c9b",
+    measurementId: "G-88HJNRDX6K"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  window.firebaseDb = db;
+  window.firebaseFns = { doc, setDoc, getDoc, onSnapshot, collection };
+  window.firebaseReady = true;
+  window.dispatchEvent(new Event('firebaseReady'));
+</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:#0a0f1e;font-family:'Inter',system-ui,sans-serif;}
@@ -20,8 +42,9 @@ input,select{outline:none;}
 <body>
 <div id="root"></div>
 <script type="text/babel">
+const {useState,useEffect,useCallback,useRef}=React;
 
-const SEED = {
+const SEED_DATA = {
   users: [
     { id:"u1", name:"Admin Général", email:"admin@stock.com", password:"admin123", role:"admin", storeIds:[] },
     { id:"u2", name:"Gérant Paris", email:"paris@stock.com", password:"paris123", role:"manager", storeIds:["s1"] },
@@ -50,24 +73,92 @@ const SEED = {
   sales:[], expenses:[], history:[],
 };
 
-function loadDb(){ try{ const r=localStorage.getItem("stockpro_v3"); return r?JSON.parse(r):null; }catch{return null;} }
-function saveDb(d){ try{ localStorage.setItem("stockpro_v3",JSON.stringify(d)); }catch{} }
-
 const fmtCur=(n)=>new Intl.NumberFormat("fr-FR",{style:"currency",currency:"EUR"}).format(n||0);
 const fmtDate=(iso)=>new Date(iso).toLocaleDateString("fr-FR");
 const fmtTime=(iso)=>new Date(iso).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
 const todayStr=()=>new Date().toISOString().split("T")[0];
 
-const {useState,useEffect,useCallback}=React;
+// Firebase save/load
+async function saveToCloud(data) {
+  try {
+    if (!window.firebaseReady) return;
+    const {doc, setDoc} = window.firebaseFns;
+    const db = window.firebaseDb;
+    await setDoc(doc(db, "stockpro", "main"), data);
+  } catch(e) { console.log("Save error:", e); }
+}
+
+async function loadFromCloud() {
+  try {
+    if (!window.firebaseReady) return null;
+    const {doc, getDoc} = window.firebaseFns;
+    const db = window.firebaseDb;
+    const snap = await getDoc(doc(db, "stockpro", "main"));
+    return snap.exists() ? snap.data() : null;
+  } catch(e) { console.log("Load error:", e); return null; }
+}
+
+function subscribeToCloud(callback) {
+  try {
+    if (!window.firebaseReady) return () => {};
+    const {doc, onSnapshot} = window.firebaseFns;
+    const db = window.firebaseDb;
+    return onSnapshot(doc(db, "stockpro", "main"), (snap) => {
+      if (snap.exists()) callback(snap.data());
+    });
+  } catch(e) { return () => {}; }
+}
 
 function App(){
-  const [db,setDb]=useState(()=>loadDb()||JSON.parse(JSON.stringify(SEED)));
+  const [db,setDb]=useState(null);
   const [user,setUser]=useState(null);
   const [page,setPage]=useState("dashboard");
+  const [loading,setLoading]=useState(true);
+  const [syncing,setSyncing]=useState(false);
+  const unsubRef=useRef(null);
 
-  const persist=useCallback((n)=>{setDb(n);saveDb(n);},[]);
+  useEffect(()=>{
+    const init = async () => {
+      // Wait for Firebase
+      if (!window.firebaseReady) {
+        await new Promise(resolve => window.addEventListener('firebaseReady', resolve, {once:true}));
+      }
+      // Try cloud first
+      const cloudData = await loadFromCloud();
+      if (cloudData) {
+        setDb(cloudData);
+      } else {
+        // First time: save seed data to cloud
+        const seed = JSON.parse(JSON.stringify(SEED_DATA));
+        await saveToCloud(seed);
+        setDb(seed);
+      }
+      // Subscribe to real-time updates
+      unsubRef.current = subscribeToCloud((data) => {
+        setDb(data);
+      });
+      setLoading(false);
+    };
+    init();
+    return () => { if(unsubRef.current) unsubRef.current(); };
+  },[]);
 
-  if(!user) return React.createElement(Login,{db,onLogin:u=>{setUser(u);setPage("dashboard");}});
+  const persist = useCallback(async (newDb) => {
+    setDb(newDb);
+    setSyncing(true);
+    await saveToCloud(newDb);
+    setSyncing(false);
+  },[]);
+
+  if(loading) return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#0a0f1e"}}>
+      <div style={{width:40,height:40,borderRadius:"50%",border:"3px solid #7c3aed",borderTopColor:"transparent",animation:"spin 0.8s linear infinite"}}/>
+      <p style={{color:"#64748b",marginTop:14,fontSize:14}}>Connexion à la base de données…</p>
+    </div>
+  );
+
+  if(!db) return null;
+  if(!user) return <Login db={db} onLogin={u=>{setUser(u);setPage("dashboard");}}/>;
 
   const myStores=user.role==="admin"?db.stores:db.stores.filter(s=>user.storeIds.includes(s.id)||s.id==="central");
   const alertCount=db.products.reduce((a,p)=>{p.variants.forEach(v=>db.stores.forEach(s=>{if((db.stock[s.id]?.[v.id]??0)<=p.lowStockThreshold)a++;}));return a;},0);
@@ -88,16 +179,16 @@ function App(){
   ];
 
   const pages={
-    dashboard:React.createElement(Dashboard,{db,user,stores:myStores,setPage}),
-    sales:React.createElement(SalesPage,{db,user,stores:myStores,persist}),
-    stock:React.createElement(StockPage,{db,user,stores:myStores,persist}),
-    transfer:React.createElement(TransferPage,{db,user,stores:myStores,persist}),
-    expenses:React.createElement(ExpensesPage,{db,user,stores:myStores,persist}),
-    alerts:React.createElement(AlertsPage,{db,stores:myStores}),
-    history:React.createElement(HistoryPage,{db}),
-    products:user.role==="admin"?React.createElement(ProductsPage,{db,persist}):null,
-    users:user.role==="admin"?React.createElement(UsersPage,{db,persist}):null,
-    stores:user.role==="admin"?React.createElement(StoresPage,{db,persist}):null,
+    dashboard:<Dashboard db={db} user={user} stores={myStores} setPage={setPage}/>,
+    sales:<SalesPage db={db} user={user} stores={myStores} persist={persist}/>,
+    stock:<StockPage db={db} user={user} stores={myStores} persist={persist}/>,
+    transfer:<TransferPage db={db} user={user} stores={myStores} persist={persist}/>,
+    expenses:<ExpensesPage db={db} user={user} stores={myStores} persist={persist}/>,
+    alerts:<AlertsPage db={db} stores={myStores}/>,
+    history:<HistoryPage db={db}/>,
+    products:user.role==="admin"?<ProductsPage db={db} persist={persist}/>:null,
+    users:user.role==="admin"?<UsersPage db={db} persist={persist}/>:null,
+    stores:user.role==="admin"?<StoresPage db={db} persist={persist}/>:null,
   };
 
   return (
@@ -106,6 +197,7 @@ function App(){
         <div style={{padding:"16px 14px",display:"flex",alignItems:"center",gap:8,borderBottom:"1px solid #1e293b"}}>
           <span style={{fontSize:20}}>📦</span>
           <span style={{fontSize:16,fontWeight:800,color:"#e2e8f0"}}>StockPro</span>
+          {syncing && <span style={{fontSize:10,color:"#7c3aed",marginLeft:"auto"}}>⟳</span>}
         </div>
         <nav style={{flex:1,padding:"8px 6px",display:"flex",flexDirection:"column",gap:1}}>
           {nav.map(({id,label,icon})=>(
@@ -121,7 +213,7 @@ function App(){
             <div style={{fontSize:12,fontWeight:600,color:"#e2e8f0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user.name}</div>
             <div style={{fontSize:11,color:"#475569"}}>{user.role==="admin"?"Admin":user.role==="manager"?"Gérant":"Personnel"}</div>
           </div>
-          <button onClick={()=>setUser(null)} style={{background:"transparent",border:"none",cursor:"pointer",color:"#475569",fontSize:16}} title="Déconnexion">⏏</button>
+          <button onClick={()=>setUser(null)} style={{background:"transparent",border:"none",cursor:"pointer",color:"#475569",fontSize:16}}>⏏</button>
         </div>
       </aside>
       <main style={{marginLeft:200,flex:1,minHeight:"100vh"}}>
@@ -238,13 +330,13 @@ function SalesPage({db,user,stores,persist}){
     setMsg({});
   };
 
-  const confirm=()=>{
+  const confirm=async()=>{
     if(!sid||!items.length)return;
     const n=JSON.parse(JSON.stringify(db));
     for(const it of items){if((n.stock[sid]?.[it.variantId]??0)<it.qty){setMsg({t:"err",m:`Stock insuffisant: ${it.productName}`});return;}}
     items.forEach(it=>{n.stock[sid][it.variantId]-=it.qty;});
     n.sales.unshift({id:`sale_${Date.now()}`,storeId:sid,date:new Date().toISOString(),user:user.name,items,total,note});
-    persist(n);setItems([]);setNote("");setMsg({t:"ok",m:"✅ Vente enregistrée !"});setTimeout(()=>setMsg({}),3000);
+    await persist(n);setItems([]);setNote("");setMsg({t:"ok",m:"✅ Vente enregistrée !"});setTimeout(()=>setMsg({}),3000);
   };
 
   const myIds=stores.map(s=>s.id);
@@ -358,7 +450,7 @@ function StockPage({db,user,stores,persist}){
   const canEdit=user.role==="admin"||(user.role==="manager"&&user.storeIds.includes(sid));
   const filtered=db.products.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.category.toLowerCase().includes(q.toLowerCase()));
   const startEdit=()=>{const d={};db.products.forEach(p=>p.variants.forEach(v=>{d[v.id]=db.stock[sid]?.[v.id]??0;}));setDraft(d);setEdit(true);};
-  const save=()=>{const n=JSON.parse(JSON.stringify(db));if(!n.stock[sid])n.stock[sid]={};Object.entries(draft).forEach(([vid,qty])=>{n.stock[sid][vid]=parseInt(qty)||0;});n.history.unshift({id:Date.now(),type:"adjust",storeId:sid,date:new Date().toISOString(),user:user.name,note:"Ajustement manuel"});persist(n);setEdit(false);};
+  const save=async()=>{const n=JSON.parse(JSON.stringify(db));if(!n.stock[sid])n.stock[sid]={};Object.entries(draft).forEach(([vid,qty])=>{n.stock[sid][vid]=parseInt(qty)||0;});n.history.unshift({id:Date.now(),type:"adjust",storeId:sid,date:new Date().toISOString(),user:user.name,note:"Ajustement manuel"});await persist(n);setEdit(false);};
   return (
     <div style={pg}>
       <PH title="Stock" sub="Inventaire par emplacement">
@@ -377,7 +469,7 @@ function StockPage({db,user,stores,persist}){
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:6}}>
             {p.variants.map(v=>{const qty=edit?(draft[v.id]??0):(db.stock[sid]?.[v.id]??0);const low=qty<=p.lowStockThreshold;return(
-              <div key={v.id} style={{background:"#0a0f1e",borderRadius:7,padding:"8px 10px",border:`1px solid ${low?"#ef4444":"#1e293b"}`,background:low?"#1a0808":"#0a0f1e"}}>
+              <div key={v.id} style={{background:low?"#1a0808":"#0a0f1e",borderRadius:7,padding:"8px 10px",border:`1px solid ${low?"#ef4444":"#1e293b"}`}}>
                 <div style={{fontSize:11,color:"#64748b",marginBottom:3}}>{v.label}</div>
                 {edit?<input style={{width:"100%",background:"#111827",border:"1px solid #334155",borderRadius:5,color:"#e2e8f0",fontSize:15,fontWeight:700,padding:"3px 6px",textAlign:"center"}} type="number" min="0" value={draft[v.id]??0} onChange={e=>setDraft(d=>({...d,[v.id]:e.target.value}))}/>:<div style={{fontSize:20,fontWeight:800,color:low?"#f87171":"#e2e8f0"}}>{qty}</div>}
                 {low&&!edit&&<div style={{fontSize:10,color:"#f87171"}}>⚠ Bas</div>}
@@ -394,7 +486,7 @@ function TransferPage({db,user,stores,persist}){
   const [from,setFrom]=useState("central");const [to,setTo]=useState(stores.find(s=>s.type==="store")?.id||"");
   const [pid,setPid]=useState(db.products[0]?.id||"");const [qtys,setQtys]=useState({});const [msg,setMsg]=useState({});
   const prod=db.products.find(p=>p.id===pid);
-  const go=()=>{
+  const go=async()=>{
     if(from===to){setMsg({t:"err",m:"Source = destination."});return;}
     const entries=Object.entries(qtys).filter(([,q])=>parseInt(q)>0);
     if(!entries.length){setMsg({t:"err",m:"Aucune quantité."});return;}
@@ -403,7 +495,7 @@ function TransferPage({db,user,stores,persist}){
     entries.forEach(([vid,q])=>{const qty=parseInt(q);n.stock[from][vid]=(n.stock[from][vid]??0)-qty;if(!n.stock[to])n.stock[to]={};n.stock[to][vid]=(n.stock[to][vid]??0)+qty;});
     const fS=db.stores.find(s=>s.id===from),tS=db.stores.find(s=>s.id===to);
     n.history.unshift({id:Date.now(),type:"transfer",from:fS.name,to:tS.name,product:prod.name,items:entries.map(([vid,q])=>({variant:prod.variants.find(v=>v.id===vid)?.label,qty:parseInt(q)})),date:new Date().toISOString(),user:user.name});
-    persist(n);setQtys({});setMsg({t:"ok",m:"✅ Transfert effectué !"});setTimeout(()=>setMsg({}),3000);
+    await persist(n);setQtys({});setMsg({t:"ok",m:"✅ Transfert effectué !"});setTimeout(()=>setMsg({}),3000);
   };
   return (
     <div style={pg}>
@@ -437,11 +529,11 @@ function ExpensesPage({db,user,stores,persist}){
   const [form,setForm]=useState({storeId:stores.find(s=>s.type==="store")?.id||"",category:"Livraison",label:"",amount:""});
   const [msg,setMsg]=useState({});
   const [filter,setFilter]=useState({store:"all",month:todayStr().slice(0,7)});
-  const add=()=>{
+  const add=async()=>{
     if(!form.storeId||!form.label||!form.amount){setMsg({t:"err",m:"Remplis tous les champs."});return;}
     const n=JSON.parse(JSON.stringify(db));
     n.expenses.unshift({id:`exp_${Date.now()}`,storeId:form.storeId,date:new Date().toISOString(),user:user.name,category:form.category,label:form.label,amount:parseFloat(form.amount)});
-    persist(n);setForm(f=>({...f,label:"",amount:""}));setMsg({t:"ok",m:"✅ Enregistrée !"});setTimeout(()=>setMsg({}),2500);
+    await persist(n);setForm(f=>({...f,label:"",amount:""}));setMsg({t:"ok",m:"✅ Enregistrée !"});setTimeout(()=>setMsg({}),2500);
   };
   const ids=stores.map(s=>s.id);
   const filtered=db.expenses.filter(e=>{
@@ -559,8 +651,8 @@ function HistoryPage({db}){
 
 function ProductsPage({db,persist}){
   const [show,setShow]=useState(false);const [np,setNp]=useState({name:"",category:"",basePrice:"",lowStockThreshold:5,variantInput:""});
-  const add=()=>{if(!np.name.trim())return;const variants=np.variantInput.split(",").map(v=>v.trim()).filter(Boolean).map((label,i)=>({id:`v_${Date.now()}_${i}`,label}));if(!variants.length)return;const n=JSON.parse(JSON.stringify(db));const id=`p_${Date.now()}`;n.products.push({id,name:np.name,category:np.category||"Général",basePrice:parseFloat(np.basePrice)||0,lowStockThreshold:parseInt(np.lowStockThreshold)||5,variants});db.stores.forEach(s=>{if(!n.stock[s.id])n.stock[s.id]={};variants.forEach(v=>{n.stock[s.id][v.id]=0;});});persist(n);setShow(false);setNp({name:"",category:"",basePrice:"",lowStockThreshold:5,variantInput:""}); };
-  const del=(pid)=>{const n=JSON.parse(JSON.stringify(db));const p=n.products.find(x=>x.id===pid);if(p){p.variants.forEach(v=>{n.stores.forEach(s=>{delete n.stock[s.id]?.[v.id];});});n.products=n.products.filter(x=>x.id!==pid);}persist(n);};
+  const add=async()=>{if(!np.name.trim())return;const variants=np.variantInput.split(",").map(v=>v.trim()).filter(Boolean).map((label,i)=>({id:`v_${Date.now()}_${i}`,label}));if(!variants.length)return;const n=JSON.parse(JSON.stringify(db));const id=`p_${Date.now()}`;n.products.push({id,name:np.name,category:np.category||"Général",basePrice:parseFloat(np.basePrice)||0,lowStockThreshold:parseInt(np.lowStockThreshold)||5,variants});db.stores.forEach(s=>{if(!n.stock[s.id])n.stock[s.id]={};variants.forEach(v=>{n.stock[s.id][v.id]=0;});});await persist(n);setShow(false);setNp({name:"",category:"",basePrice:"",lowStockThreshold:5,variantInput:""}); };
+  const del=async(pid)=>{const n=JSON.parse(JSON.stringify(db));const p=n.products.find(x=>x.id===pid);if(p){p.variants.forEach(v=>{n.stores.forEach(s=>{delete n.stock[s.id]?.[v.id];});});n.products=n.products.filter(x=>x.id!==pid);}await persist(n);};
   return (
     <div style={pg}>
       <PH title="Produits" sub={`${db.products.length} produit${db.products.length>1?"s":""}`}><button style={btn} onClick={()=>setShow(!show)}>+ Ajouter</button></PH>
@@ -590,8 +682,8 @@ function ProductsPage({db,persist}){
 
 function UsersPage({db,persist}){
   const [show,setShow]=useState(false);const [nu,setNu]=useState({name:"",email:"",password:"",role:"staff",storeIds:[]});
-  const add=()=>{if(!nu.name||!nu.email||!nu.password)return;const n=JSON.parse(JSON.stringify(db));n.users.push({id:`u_${Date.now()}`,...nu});persist(n);setShow(false);setNu({name:"",email:"",password:"",role:"staff",storeIds:[]});};
-  const del=(uid)=>{const n=JSON.parse(JSON.stringify(db));n.users=n.users.filter(u=>u.id!==uid);persist(n);};
+  const add=async()=>{if(!nu.name||!nu.email||!nu.password)return;const n=JSON.parse(JSON.stringify(db));n.users.push({id:`u_${Date.now()}`,...nu});await persist(n);setShow(false);setNu({name:"",email:"",password:"",role:"staff",storeIds:[]});};
+  const del=async(uid)=>{const n=JSON.parse(JSON.stringify(db));n.users=n.users.filter(u=>u.id!==uid);await persist(n);};
   const rl={admin:"Administrateur",manager:"Gérant",staff:"Personnel"};
   return (
     <div style={pg}>
@@ -622,8 +714,8 @@ function UsersPage({db,persist}){
 
 function StoresPage({db,persist}){
   const [show,setShow]=useState(false);const [name,setName]=useState("");
-  const add=()=>{if(!name.trim())return;const n=JSON.parse(JSON.stringify(db));const id=`s_${Date.now()}`;n.stores.push({id,name,type:"store"});n.stock[id]={};persist(n);setShow(false);setName("");};
-  const del=(sid)=>{if(sid==="central")return;const n=JSON.parse(JSON.stringify(db));n.stores=n.stores.filter(s=>s.id!==sid);delete n.stock[sid];persist(n);};
+  const add=async()=>{if(!name.trim())return;const n=JSON.parse(JSON.stringify(db));const id=`s_${Date.now()}`;n.stores.push({id,name,type:"store"});n.stock[id]={};await persist(n);setShow(false);setName("");};
+  const del=async(sid)=>{if(sid==="central")return;const n=JSON.parse(JSON.stringify(db));n.stores=n.stores.filter(s=>s.id!==sid);delete n.stock[sid];await persist(n);};
   return (
     <div style={pg}>
       <PH title="Boutiques" sub={`${db.stores.length} emplacement${db.stores.length>1?"s":""}`}><button style={btn} onClick={()=>setShow(!show)}>+ Ajouter</button></PH>
